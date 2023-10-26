@@ -416,5 +416,8 @@ def open_workbook(filename: str):
         print(e)
 
 if __name__ == "__main__":
+    # build workbook and save filename
     filename = build_workbook(constructor)
+
+    # open workbook after building it
     open_workbook(filename)
