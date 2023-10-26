@@ -243,7 +243,13 @@ for item, values in items.items():
 
 def build_workbook(constructor: dict[str, any]):
     import openpyxl
-    from openpyxl.utils import get_column_letter
+    from openpyxl.styles import Border, Side
+
+    def set_border(ws, cell_range):
+        thin = Side(border_style="thin", color="000000")
+        for row in ws[cell_range]:
+            for cell in row:
+                cell.border = Border(top=thin, left=thin, right=thin, bottom=thin)    
     
     workbook = openpyxl.Workbook()
     sheet = workbook.active
@@ -400,6 +406,8 @@ def build_workbook(constructor: dict[str, any]):
     sheet.page_setup.fitToPage = True
     sheet.page_setup.fitToHeight = False
     sheet.page_setup.fitToWidth = 1
+
+    set_border(sheet, f"A1:L{max_rows}")
 
     contract_number = constructor["Contract #"].split(" ")[0]
     filename = os.path.join(save_path, f"{contract_number}.xlsx")
