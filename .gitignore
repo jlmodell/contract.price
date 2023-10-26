@@ -1,4 +1,6 @@
 .env
+config.yaml
+contracts_config.yaml
 dist
 build
 /**/*.xlsx

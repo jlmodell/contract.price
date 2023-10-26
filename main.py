@@ -5,14 +5,69 @@ from rich import print
 from datetime import datetime
 from pymongo import MongoClient
 import warnings
-from dotenv import load_dotenv
-load_dotenv()
+import yaml
+
+def get_config():
+    config_path = r"config.yaml"
+    if not os.path.exists(config_path):
+        config_path = r"C:\temp\contracts_config.yaml"
+    
+    assert os.path.exists(config_path), f"Could not find config file at {config_path}"
+    
+    with open(config_path, "r") as f:
+        config = yaml.load(f, Loader=yaml.FullLoader)
+
+    return config
+
+config = get_config()
+
+MONGODB_URI=config["MONGODB_URI"]
 
 warnings.filterwarnings('ignore')
 
 save_path = r"C:\My Documents\Converted Contracts"
 if not os.path.exists(save_path):
     os.makedirs(save_path)
+
+base = r"C:\temp"
+if not os.path.exists(base):
+    os.makedirs(base)
+
+contract = os.path.join(base, "specialpricing.csv")
+assert os.path.exists(contract), """
+**********************************************************************
+    
+    Step 1: run `GET.CONTRACT.INFO` in ROI
+          
+        * Input Contract Number
+        * Hit "Enter" and Hit "F3" to continue        
+        
+    Step 2: Type "y" and hit "Enter" to continue below
+          
+**********************************************************************\n"""
+
+sales_end_date = datetime.today().replace(day=1) - pd.DateOffset(days=1)
+sales_end_date = pd.to_datetime(sales_end_date)    
+sales_start_date_py = sales_end_date - pd.DateOffset(months=24) + pd.DateOffset(days=1)  
+sales_file = os.path.join(base, "sales.for.period.csv")
+assert os.path.exists(sales_file), f"""
+**********************************************************************
+        
+    Step 0: run `GET.SALES.FOR.MDB` in ROI 
+        
+        > Perform step 0 *ONCE A MONTH* on/about 1st of the month <
+
+        Calculating dates for you to use...
+
+        * Input Sales Start Date -> {sales_start_date_py: %m%d%y}  <- and Hit "Enter"
+        * Input Sales End Date -> {sales_end_date: %m%d%y}  <- and Hit "Enter"
+        * Accept `ALL` for customers and hit "Enter"
+        * Accept `ALL` for items and hit "Enter"
+        * Hit "F3" to continue
+        
+        (This should take 2-3 minutes as it is a large query)
+      
+**********************************************************************\n"""
 
 def print_instructions_to_terminal():
     """
@@ -47,7 +102,7 @@ def print_instructions_to_terminal():
     Step 2: Type "y" and hit "Enter" to continue below
           
 **********************************************************************
-
+    {datetime.now(): %m/%d/%Y %H:%M:%S} --    
         Are you ready to continue? (y/n):\t"""
 
     ready = False
@@ -57,12 +112,22 @@ def print_instructions_to_terminal():
             ready = True
     
     return ready
-    
+
+# if day is between 1-5 print a reminder to run GET.SALES.FOR.MDB
+if datetime.today().day <= 5:
+    print("""
+                        *-*-*-*-*-*-*-*-*-*-*-*-*
+                        *                       *
+                        *  Make Sure to Re-Run  *                              
+                        *  `GET.SALES.FOR.MDB`  *
+                        *                       *          
+                        *-*-*-*-*-*-*-*-*-*-*-*-*""")
+
 ready = False
 while not ready:
     ready = print_instructions_to_terminal()
 
-client = MongoClient(os.getenv("MONGODB_URI"))
+client = MongoClient(MONGODB_URI)
 db = client.bussepricing
 costs_db = db.costs
 items_db = db.items
@@ -82,10 +147,6 @@ def get_description(item: str) -> str:
     if doc:
         return doc["name"]
     return ""
-
-base = r"C:\temp"
-
-contract = os.path.join(base, "specialpricing.csv")
 
 contract = pd.read_csv(contract, header=None, dtype=str, infer_datetime_format=True)
 contract.columns = [
@@ -128,7 +189,6 @@ sales_start_date = sales_end_date - pd.DateOffset(months=12)
 sales_end_date_py = sales_end_date - pd.DateOffset(months=12)
 sales_start_date_py = sales_end_date - pd.DateOffset(months=24) + pd.DateOffset(days=1)
 
-sales_file = os.path.join(base, "sales.for.period.csv")
 
 sales = pl.read_csv(
     sales_file,

@@ -16,6 +16,7 @@ pyinstaller = "^6.1.0"
 polars = "^0.19.11"
 pyarrow = "^13.0.0"
 pydotenv = "^0.0.7"
+pyyaml = "^6.0.1"
 
 
 [build-system]
