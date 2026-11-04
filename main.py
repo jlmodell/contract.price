@@ -148,7 +148,7 @@ def get_description(item: str) -> str:
         return doc["name"]
     return ""
 
-contract = pd.read_csv(contract, header=None, dtype=str, infer_datetime_format=True)
+contract = pd.read_csv(contract, header=None, dtype=str, keep_default_na=False)
 contract.columns = [
     "contract",
     "item",
@@ -164,30 +164,45 @@ contract.columns = [
     "cust name",
 ]
 
-contract = contract[contract["item"].isna() == False]
-
-contract["item"] = contract["item"].astype(str)
-contract["cust nbr"] = contract["cust nbr"].astype(str)
+contract["item"] = contract["item"].astype(str).str.strip()
+contract["cust nbr"] = contract["cust nbr"].astype(str).str.strip()
 contract["min quantity"] = contract["min quantity"].astype(int)
 contract["unit price"] = contract["unit price"].astype(float)
 
 _contract = contract.to_dict(orient="records")
+
+# Customer-only ROI rows have a blank item; collect customers before dropping them.
+cust_codes = list({
+    str(c["cust nbr"]).split("*")[0].strip()
+    for c in _contract
+    if str(c.get("cust nbr") or "").strip()
+})
+curr_customers = list({
+    c["cust name"]
+    for c in _contract
+    if str(c.get("cust name") or "").strip()
+})
+
+print("\n========== CONTRACT DEBUG ==========")
+print(f"Contract rows: {len(_contract)}")
+print(f"Customer codes used for sales lookup: {cust_codes}")
+print(f"Customer names: {curr_customers}")
+for row in _contract:
+    print(f"  item={row['item']!r}  cust nbr={row['cust nbr']!r}  cust name={row['cust name']!r}")
+
 contract = [c for c in _contract if c["item"] != ""]
 
 curr_contract = f"{contract[0]['contract']} ({contract[0]['contract name']})"
-curr_customers = list(set([c["cust name"] for c in contract]))
 curr_contract_customers = ", ".join(curr_customers[:1]) + ", ..." if len(curr_customers) > 1 else ", ".join(curr_customers)
-cust_codes = list(set([c.split("*")[0] for c in list(set([c["cust nbr"] for c in contract]))]))
 curr_contract_start_date = contract[0]["start date"]
 curr_contract_end_date = contract[0]["end date"]
 
 items = {c["item"]: {"unit_price": c["unit price"], "min_qty": c["min quantity"], "uom": c["uom"]} for c in contract}
 
-sales_end_date = datetime.today().replace(day=1) - pd.DateOffset(days=1)
-sales_end_date = pd.to_datetime(sales_end_date)
-sales_start_date = sales_end_date - pd.DateOffset(months=12)
-sales_end_date_py = sales_end_date - pd.DateOffset(months=12)
-sales_start_date_py = sales_end_date - pd.DateOffset(months=24) + pd.DateOffset(days=1)
+sales_start_date = pd.to_datetime(curr_contract_start_date)
+sales_end_date = pd.to_datetime(curr_contract_end_date)
+sales_start_date_py = sales_start_date - pd.DateOffset(years=1)
+sales_end_date_py = sales_end_date - pd.DateOffset(years=1)
 
 
 sales = pl.read_csv(
@@ -202,6 +217,17 @@ sales = sales.with_columns(
 )
 
 sales = sales.to_pandas()
+sales["ITEM_PART_NBR"] = sales["ITEM_PART_NBR"].astype(str).str.strip()
+sales["CUST_NBR"] = sales["CUST_NBR"].astype(str).str.strip()
+sales["INV_SO_DATE"] = pd.to_datetime(sales["INV_SO_DATE"])
+
+print("\n========== SALES DEBUG ==========")
+print(f"Sales rows: {len(sales)}")
+print(f"Contract period (current year): {sales_start_date:%Y-%m-%d} to {sales_end_date:%Y-%m-%d}")
+print(f"Previous period: {sales_start_date_py:%Y-%m-%d} to {sales_end_date_py:%Y-%m-%d}")
+print(f"ITEM_PART_NBR dtype={sales['ITEM_PART_NBR'].dtype} sample={sales['ITEM_PART_NBR'].head(3).map(repr).tolist()}")
+print(f"CUST_NBR dtype={sales['CUST_NBR'].dtype} sample={sales['CUST_NBR'].head(3).map(repr).tolist()}")
+print(f"INV_SO_DATE dtype={sales['INV_SO_DATE'].dtype} sample={sales['INV_SO_DATE'].head(3).tolist()}")
 
 constructor = {
     "Contract #": curr_contract,
@@ -212,19 +238,29 @@ constructor = {
     "Items": []
 }
 
+print("\n========== ITEM MATCH DEBUG ==========")
 for item, values in items.items():
-    curr_sales = sales[
-            (sales["ITEM_PART_NBR"] == item)
-            & (sales["CUST_NBR"].isin(cust_codes))
-            & (sales["INV_SO_DATE"] >= sales_start_date)
-            & (sales["INV_SO_DATE"] <= sales_end_date)
+    item_rows = sales[sales["ITEM_PART_NBR"] == item]
+    item_cust_rows = item_rows[item_rows["CUST_NBR"].isin(cust_codes)]
+    curr_sales = item_cust_rows[
+            (item_cust_rows["INV_SO_DATE"] >= sales_start_date)
+            & (item_cust_rows["INV_SO_DATE"] <= sales_end_date)
         ].copy()
-    prev_year_sales = sales[
-            (sales["ITEM_PART_NBR"] == item)
-            & (sales["CUST_NBR"].isin(cust_codes))
-            & (sales["INV_SO_DATE"] >= sales_start_date_py)
-            & (sales["INV_SO_DATE"] <= sales_end_date_py)
-        ].copy()        
+    prev_year_sales = item_cust_rows[
+            (item_cust_rows["INV_SO_DATE"] >= sales_start_date_py)
+            & (item_cust_rows["INV_SO_DATE"] <= sales_end_date_py)
+        ].copy()
+
+    print(f"Item {item!r}")
+    print(f"  sales with this item: {len(item_rows)}")
+    print(f"  sales with this item + contract customers: {len(item_cust_rows)}")
+    print(f"  current year rows: {len(curr_sales)}  qty={curr_sales['QUANTITY'].sum() if len(curr_sales) else 0}  $={curr_sales['SALES'].sum() if len(curr_sales) else 0}")
+    print(f"  previous year rows: {len(prev_year_sales)}  qty={prev_year_sales['QUANTITY'].sum() if len(prev_year_sales) else 0}  $={prev_year_sales['SALES'].sum() if len(prev_year_sales) else 0}")
+    if len(item_rows) and len(item_cust_rows) == 0:
+        print(f"  customers on sales for this item: {sorted(item_rows['CUST_NBR'].astype(str).unique().tolist())}")
+    if len(item_cust_rows):
+        print(item_cust_rows[["INV_SO_DATE", "CUST_NBR", "ITEM_PART_NBR", "QUANTITY", "SALES"]].to_string(index=False))
+    print()
     
     constructor["Items"].append([
         item,
